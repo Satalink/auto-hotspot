@@ -1,17 +1,17 @@
 # Auto Hotspot configuration
 # This file is loaded by auto-hotspot.ps1 on startup.
 
-PhoneHotspotSsid: "Satalink"
+PhoneHotspotSsid: "wifi-ssid-1"
 
 FallbackSsids:
-  - "Twin Lakes 3 5G"
-  - "Twin Lakes 3"
-  - "Twin Lakes 4 5G"
-  - "Twin Lakes 4"
-  - "Twin Lakes 5 5G"
-  - "Twin Lakes 5"
-  - "Twin Lakes 6 5G"
-  - "Twin Lakes 6"
+  - "wifi-ssid-2"
+  - "wifi-ssid-3"
+  - "wifi-ssid-4"
+  - "wifi-ssid-5"
+  - "wifi-ssid-6"
+  - "wifi-ssid-7"
+  - "wifi-ssid-8"
+  - "wifi-ssid-9"
 
 WifiInterfaceAlias: "Wi-Fi"
 PollSeconds: 30
