@@ -1,17 +1,12 @@
 # Auto Hotspot configuration
 # This file is loaded by auto-hotspot.ps1 on startup.
 
-PhoneHotspotSsid: "wifi-ssid-1"
+PhoneHotspotSsid: "phone-hostspot-ssid-1"
 
 FallbackSsids:
+  - "wifi-ssid-1"
   - "wifi-ssid-2"
   - "wifi-ssid-3"
-  - "wifi-ssid-4"
-  - "wifi-ssid-5"
-  - "wifi-ssid-6"
-  - "wifi-ssid-7"
-  - "wifi-ssid-8"
-  - "wifi-ssid-9"
 
 WifiInterfaceAlias: "Wi-Fi"
 PollSeconds: 30
