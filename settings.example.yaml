@@ -1,5 +1,5 @@
 # Auto Hotspot configuration
-# This file is loaded by auto-hotspot.ps1 on startup.
+# Copy this file to settings.yaml and replace the example values.
 
 PhoneHotspotSsid: "phone-hostspot-ssid-1"
 

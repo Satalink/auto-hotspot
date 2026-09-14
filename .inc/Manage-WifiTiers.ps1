@@ -196,7 +196,7 @@ function Invoke-WifiTierManager {
     $phoneSsidVisible = Test-WifiSsidAvailable -Ssid $PhoneHotspotSsid
 
     # Windows does not list this laptop's own Mobile Hotspot in the scan, but
-    # it does list the phone's Satalink SSID when the phone hotspot is active.
+    # it does list the configured phone SSID when the phone hotspot is active.
     if ($laptopHotspotEnabled) {
         $now = Get-Date
         $probeSlot = [math]::Floor($now.TimeOfDay.TotalMinutes / $PhoneProbeMinutes)
