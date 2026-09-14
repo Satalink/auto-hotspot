@@ -91,6 +91,25 @@ powershell -ExecutionPolicy Bypass -File .\auto-hotspot.ps1
 
 The script will continue running until you stop it.
 
+## Task Scheduler
+
+To start the network manager automatically, create a Windows Task Scheduler task:
+
+1. Open **Task Scheduler** and select **Create Task**.
+2. On **General**:
+  - Set a descriptive name such as `Auto Hotspot`.
+  - Select **Run only when user is logged on**.
+  - Select **Run with highest privileges**.
+3. On **Triggers**, add **At log on** for your Windows account.
+4. On **Actions**, create a **Start a program** action:
+  - **Program/script:** `powershell.exe`
+  - **Add arguments:** `-NoProfile -ExecutionPolicy Bypass -File "C:\Scripts\auto-hotspot\auto-hotspot.ps1"`
+  - **Start in:** `C:\Scripts\auto-hotspot`
+5. On **Conditions**, clear **Start the task only if the computer is on AC power** if it should also run on battery.
+6. Save the task, then use **Run** to test it.
+
+Keep only one copy of the script running at a time. If you change `settings.yaml`, stop and restart the scheduled task so the new values are loaded.
+
 ## Notes
 
 - `netsh wlan connect` requires the target network profile to already exist on the host.
