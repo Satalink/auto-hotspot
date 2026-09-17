@@ -103,8 +103,8 @@ if ([string]::IsNullOrWhiteSpace($YamlContent)) {
 }
 
 $Config = ConvertFrom-SimpleYaml -YamlText $YamlContent
-$PhoneHotspotSsid = $Config.PhoneHotspotSsid
-$FallbackSsids = @($Config.FallbackSsids)
+$PhoneHotspotSSID = $Config.PhoneHotspotSSID
+$FallbackSSIDs = @($Config.FallbackSSIDs)
 $WifiInterfaceAlias = if ($Config.WifiInterfaceAlias) { $Config.WifiInterfaceAlias } else { 'Wi-Fi' }
 $PollSeconds = if ($Config.PollSeconds) { [int]$Config.PollSeconds } else { 30 }
 $PhoneUnavailableThreshold = if ($Config.PhoneUnavailableThreshold) { [int]$Config.PhoneUnavailableThreshold } else { 3 }
@@ -113,8 +113,8 @@ $PhoneProbeMinutes = if ($Config.PhoneProbeMinutes) { [int]$Config.PhoneProbeMin
 # MAIN
 while ($true) {
     Invoke-WifiTierManager `
-        -PhoneHotspotSsid $PhoneHotspotSsid `
-        -FallbackSsids $FallbackSsids `
+        -PhoneHotspotSSID $PhoneHotspotSSID `
+        -FallbackSSIDs $FallbackSSIDs `
         -InterfaceAlias $WifiInterfaceAlias `
         -PhoneUnavailableThreshold $PhoneUnavailableThreshold `
         -PhoneProbeMinutes $PhoneProbeMinutes

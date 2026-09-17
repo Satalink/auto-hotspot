@@ -58,8 +58,8 @@ This is helpful for roaming setups where the phone may be connected to a public 
 
 Copy [settings.example.yaml](settings.example.yaml) to `settings.yaml`, then edit the local file to change:
 
-- `PhoneHotspotSsid`
-- `FallbackSsids`
+- `PhoneHotspotSSID`
+- `FallbackSSIDs`
 - `WifiInterfaceAlias`
 - `PollSeconds`
 - `PhoneUnavailableThreshold`
@@ -68,8 +68,8 @@ Copy [settings.example.yaml](settings.example.yaml) to `settings.yaml`, then edi
 Example:
 
 ```yaml
-PhoneHotspotSsid: "phone-hostspot-ssid-1"
-FallbackSsids:
+PhoneHotspotSSID: "phone-hostspot-ssid-1"
+FallbackSSIDs:
   - "wifi-ssid-1"
   - "wifi-ssid-2"
 WifiInterfaceAlias: "Wi-Fi"

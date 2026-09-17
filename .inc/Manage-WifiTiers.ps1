@@ -122,7 +122,14 @@ function Set-LaptopHotspotState {
     }
 
     $changed = if ($Enabled) { SetHotspot(1) } else { SetHotspot(0) }
-    if ($changed -or ((Get-LaptopHotspotEnabled) -eq $Enabled)) {
+    if ($changed) {
+        for ($attempt = 0; $attempt -lt 5; $attempt++) {
+            Start-Sleep -Seconds 1
+            if ((Get-LaptopHotspotEnabled) -eq $Enabled) {
+                return $true
+            }
+        }
+    } elseif ((Get-LaptopHotspotEnabled) -eq $Enabled) {
         return $true
     }
 
@@ -143,7 +150,7 @@ function Invoke-NetworkRefresh {
 function Invoke-PhoneHotspotProbe {
     param(
         [Parameter(Mandatory)]
-        [string]$PhoneHotspotSsid,
+        [string]$PhoneHotspotSSID,
 
         [Parameter(Mandatory)]
         [string]$InterfaceAlias
@@ -155,14 +162,14 @@ function Invoke-PhoneHotspotProbe {
     }
 
     Start-Sleep -Seconds 3
-    $phoneDetected = Test-WifiSsidAvailable -Ssid $PhoneHotspotSsid
-    if ($phoneDetected -eq $true -and (Connect-WifiSsid -Ssid $PhoneHotspotSsid -InterfaceAlias $InterfaceAlias)) {
+    $phoneDetected = Test-WifiSsidAvailable -Ssid $PhoneHotspotSSID
+    if ($phoneDetected -eq $true -and (Connect-WifiSsid -Ssid $PhoneHotspotSSID -InterfaceAlias $InterfaceAlias)) {
         Invoke-NetworkRefresh
-        Write-Host "Phone hotspot '$PhoneHotspotSsid' detected during probe." -ForegroundColor Green
+        Write-Host "Phone hotspot '$PhoneHotspotSSID' detected during probe." -ForegroundColor Green
         return $true
     }
 
-    Write-Host "Phone hotspot '$PhoneHotspotSsid' not detected during probe; restoring laptop hotspot." -ForegroundColor Yellow
+    Write-Host "Phone hotspot '$PhoneHotspotSSID' not detected during probe; restoring laptop hotspot." -ForegroundColor Yellow
     Set-LaptopHotspotState -Enabled $true | Out-Null
     return $false
 }
@@ -170,10 +177,10 @@ function Invoke-PhoneHotspotProbe {
 function Invoke-WifiTierManager {
     param(
         [Parameter(Mandatory)]
-        [string]$PhoneHotspotSsid,
+        [string]$PhoneHotspotSSID,
 
         [Parameter(Mandatory)]
-        [string[]]$FallbackSsids,
+        [string[]]$FallbackSSIDs,
 
         [string]$InterfaceAlias = 'Wi-Fi',
 
@@ -193,7 +200,7 @@ function Invoke-WifiTierManager {
         }
         Write-Host "[!] Tethering state unavailable; retaining previous laptop-hotspot state: $laptopHotspotEnabled." -ForegroundColor Yellow
     }
-    $phoneSsidVisible = Test-WifiSsidAvailable -Ssid $PhoneHotspotSsid
+    $phoneSsidVisible = Test-WifiSsidAvailable -Ssid $PhoneHotspotSSID
 
     # Windows does not list this laptop's own Mobile Hotspot in the scan, but
     # it does list the configured phone SSID when the phone hotspot is active.
@@ -208,7 +215,7 @@ function Invoke-WifiTierManager {
         $probeDue = ($script:LastPhoneProbeSlotKey -ne $currentProbeSlotKey)
         if ($probeDue) {
             $script:LastPhoneProbeSlotKey = $currentProbeSlotKey
-            if (Invoke-PhoneHotspotProbe -PhoneHotspotSsid $PhoneHotspotSsid -InterfaceAlias $InterfaceAlias) {
+            if (Invoke-PhoneHotspotProbe -PhoneHotspotSSID $PhoneHotspotSSID -InterfaceAlias $InterfaceAlias) {
                 $script:PhoneUnavailableMisses = 0
             }
             return
@@ -222,14 +229,14 @@ function Invoke-WifiTierManager {
                 return
             }
 
-            if (-not (Connect-WifiSsid -Ssid $PhoneHotspotSsid -InterfaceAlias $InterfaceAlias)) {
+            if (-not (Connect-WifiSsid -Ssid $PhoneHotspotSSID -InterfaceAlias $InterfaceAlias)) {
                 Write-Host "[!] Phone hotspot was visible but the connection did not complete." -ForegroundColor Yellow
                 return
             }
 
             $script:PhoneUnavailableMisses = 0
             Invoke-NetworkRefresh
-            Write-Host "Phone hotspot '$PhoneHotspotSsid' is connected." -ForegroundColor Green
+            Write-Host "Phone hotspot '$PhoneHotspotSSID' is connected." -ForegroundColor Green
             return
         }
 
@@ -250,15 +257,15 @@ function Invoke-WifiTierManager {
     $phoneAvailable = ($phoneSsidVisible -eq $true) -and -not $laptopHotspotEnabled
 
     if ($phoneAvailable) {
-        if ($connectedSsid -ne $PhoneHotspotSsid) {
-            if (Connect-WifiSsid -Ssid $PhoneHotspotSsid -InterfaceAlias $InterfaceAlias) {
-                Write-Host "Phone hotspot '$PhoneHotspotSsid' is connected." -ForegroundColor Green
+        if ($connectedSsid -ne $PhoneHotspotSSID) {
+            if (Connect-WifiSsid -Ssid $PhoneHotspotSSID -InterfaceAlias $InterfaceAlias) {
+                Write-Host "Phone hotspot '$PhoneHotspotSSID' is connected." -ForegroundColor Green
                 Invoke-NetworkRefresh
             } else {
                 $phoneAvailable = $false
             }
         } else {
-            Write-Host "Phone hotspot '$PhoneHotspotSsid' is connected." -ForegroundColor Green
+            Write-Host "Phone hotspot '$PhoneHotspotSSID' is connected." -ForegroundColor Green
         }
 
         if ($phoneAvailable) {
@@ -267,11 +274,26 @@ function Invoke-WifiTierManager {
         }
     }
 
+    if ($connectedSsid -and ($FallbackSSIDs -contains $connectedSsid)) {
+        if (-not (Set-LaptopHotspotState -Enabled $true)) {
+            Write-Host "[!] Fallback Wi-Fi '$connectedSsid' is connected, but the laptop hotspot could not be enabled." -ForegroundColor Yellow
+            return
+        }
+
+        $now = Get-Date
+        $slot = [math]::Floor($now.TimeOfDay.TotalMinutes / $PhoneProbeMinutes)
+        $script:LastPhoneProbeSlotKey = "$($now.ToString('yyyy-MM-dd'))-$slot"
+        $script:PhoneUnavailableMisses = 0
+        Write-Host "Fallback Wi-Fi '$connectedSsid' is connected; laptop hotspot is active." -ForegroundColor Green
+        Invoke-NetworkRefresh
+        return
+    }
+
     if ($null -eq $script:PhoneUnavailableMisses) {
         $script:PhoneUnavailableMisses = 0
     }
     $script:PhoneUnavailableMisses++
-    Write-Host "Phone hotspot '$PhoneHotspotSsid' unavailable. Miss $($script:PhoneUnavailableMisses) of $PhoneUnavailableThreshold." -ForegroundColor Yellow
+    Write-Host "Phone hotspot '$PhoneHotspotSSID' unavailable. Miss $($script:PhoneUnavailableMisses) of $PhoneUnavailableThreshold." -ForegroundColor Yellow
 
     if ($script:PhoneUnavailableMisses -lt $PhoneUnavailableThreshold) {
         return
@@ -279,15 +301,15 @@ function Invoke-WifiTierManager {
 
     Write-Host "Phone hotspot threshold reached; switching to fallback Wi-Fi." -ForegroundColor Yellow
 
-    if ($connectedSsid -eq $PhoneHotspotSsid) {
+    if ($connectedSsid -eq $PhoneHotspotSSID) {
         $netshPath = Get-NetshPath
         & $netshPath wlan disconnect interface="$InterfaceAlias" | Out-Null
         Start-Sleep -Seconds 2
         $connectedSsid = Get-ConnectedWifiSsid
-        Write-Host "Phone hotspot '$PhoneHotspotSsid' is unavailable; disconnected." -ForegroundColor Yellow
+        Write-Host "Phone hotspot '$PhoneHotspotSSID' is unavailable; disconnected." -ForegroundColor Yellow
     }
 
-    foreach ($fallbackSsid in $FallbackSsids) {
+    foreach ($fallbackSsid in $FallbackSSIDs) {
         $fallbackAvailable = Test-WifiSsidAvailable -Ssid $fallbackSsid
         if ($fallbackAvailable -ne $true) {
             continue
