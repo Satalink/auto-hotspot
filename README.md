@@ -86,10 +86,10 @@ PhoneProbeMinutes: 3
 4. Run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\auto-hotspot.ps1
+powershell -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File .\auto-hotspot.ps1
 ```
 
-The script will continue running until you stop it.
+The script will continue running until you stop it. Use `-NonInteractive` to prevent prompts and `-WindowStyle Hidden` so no PowerShell window is displayed.
 
 ## Task Scheduler
 
@@ -103,12 +103,14 @@ To start the network manager automatically, create a Windows Task Scheduler task
 3. On **Triggers**, add **At log on** for your Windows account.
 4. On **Actions**, create a **Start a program** action:
   - **Program/script:** `powershell.exe`
-  - **Add arguments:** `-NoProfile -ExecutionPolicy Bypass -File "C:\Scripts\auto-hotspot\auto-hotspot.ps1"`
+  - **Add arguments:** `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\Scripts\auto-hotspot\auto-hotspot.ps1"`
   - **Start in:** `C:\Scripts\auto-hotspot`
 5. On **Conditions**, clear **Start the task only if the computer is on AC power** if it should also run on battery.
 6. Save the task, then use **Run** to test it.
 
 Keep only one copy of the script running at a time. If you change `settings.yaml`, stop and restart the scheduled task so the new values are loaded.
+
+If the task already exists, open its **Actions** tab and replace the arguments with the hidden-window version above, then save the task. For a fully non-interactive task, **Run whether user is logged on or not** can also be selected on the **General** tab; Windows may ask for the account password when saving that setting.
 
 ## Notes
 

@@ -108,7 +108,6 @@ $FallbackSSIDs = @($Config.FallbackSSIDs)
 $WifiInterfaceAlias = if ($Config.WifiInterfaceAlias) { $Config.WifiInterfaceAlias } else { 'Wi-Fi' }
 $PollSeconds = if ($Config.PollSeconds) { [int]$Config.PollSeconds } else { 30 }
 $PhoneUnavailableThreshold = if ($Config.PhoneUnavailableThreshold) { [int]$Config.PhoneUnavailableThreshold } else { 3 }
-$PhoneProbeMinutes = if ($Config.PhoneProbeMinutes) { [int]$Config.PhoneProbeMinutes } else { 3 }
 
 # MAIN
 while ($true) {
@@ -116,8 +115,7 @@ while ($true) {
         -PhoneHotspotSSID $PhoneHotspotSSID `
         -FallbackSSIDs $FallbackSSIDs `
         -InterfaceAlias $WifiInterfaceAlias `
-        -PhoneUnavailableThreshold $PhoneUnavailableThreshold `
-        -PhoneProbeMinutes $PhoneProbeMinutes
+        -PhoneUnavailableThreshold $PhoneUnavailableThreshold
 
     Start-Sleep -Seconds $PollSeconds
 }

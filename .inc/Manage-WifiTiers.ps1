@@ -3,7 +3,6 @@ function Get-NetshPath {
     if (-not (Test-Path -LiteralPath $netshPath)) {
         throw "Windows netsh.exe was not found at '$netshPath'."
     }
-
     return $netshPath
 }
 
@@ -15,14 +14,11 @@ function Get-ConnectedWifiSsid {
     if ($ssidLine -and $ssidLine -match '^\s*SSID\s*:\s*(.+)$') {
         return $Matches[1].Trim()
     }
-
     return $null
 }
 
 function Get-WifiAdapter {
-    if ($script:WifiAdapter) {
-        return $script:WifiAdapter
-    }
+    if ($script:WifiAdapter) { return $script:WifiAdapter }
 
     try {
         [Windows.Devices.WiFi.WiFiAdapter, Windows.Devices.WiFi, ContentType=WindowsRuntime] | Out-Null
@@ -46,6 +42,32 @@ function Get-WifiAdapter {
     }
 }
 
+function Get-LocalMacAddresses {
+    $macs = @()
+    try {
+        Get-CimInstance Win32_NetworkAdapter -Filter "MACAddress IS NOT NULL" -ErrorAction SilentlyContinue | ForEach-Object {
+            $macs += ($_.MACAddress -replace '-', ':').ToUpper()
+        }
+        Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.MacAddress) {
+                $macs += ($_.MacAddress -replace '-', ':').ToUpper()
+            }
+        }
+    } catch { }
+
+    $derivedMacs = @()
+    foreach ($mac in $macs) {
+        if ($mac -match '^([0-9A-F]{2})(:[0-9A-F]{2}){5}$') {
+            $firstOctetHex = $Matches[1]
+            $firstOctetInt = [Convert]::ToByte($firstOctetHex, 16)
+            $localOctet = $firstOctetInt -bor 0x02
+            $derived = "{0:X2}{1}" -f $localOctet, $mac.Substring(2)
+            $derivedMacs += $derived
+        }
+    }
+    return ($macs + $derivedMacs) | Select-Object -Unique
+}
+
 function Test-WifiSsidAvailable {
     param(
         [Parameter(Mandatory)]
@@ -53,9 +75,9 @@ function Test-WifiSsidAvailable {
     )
 
     $adapter = Get-WifiAdapter
-    if ($null -eq $adapter) {
-        return $null
-    }
+    if ($null -eq $adapter) { return $null }
+
+    $localMacs = Get-LocalMacAddresses
 
     try {
         $scanOperation = $adapter.ScanAsync()
@@ -77,13 +99,19 @@ function Test-WifiSsidAvailable {
             return $null
         }
 
+        $foundExternal = $false
         foreach ($network in $adapter.NetworkReport.AvailableNetworks) {
             if ($network.Ssid -eq $Ssid) {
-                return $true
+                $networkBssid = ($network.Bssid -replace '-', ':').ToUpper()
+                if (-not ($localMacs -contains $networkBssid)) {
+                    $foundExternal = $true
+                    break
+                }
             }
         }
+        
+        return $foundExternal
 
-        return $false
     } catch {
         Write-Host "[!] Windows Wi-Fi scan failed: $($_.Exception.Message)" -ForegroundColor Yellow
         return $null
@@ -94,7 +122,6 @@ function Connect-WifiSsid {
     param(
         [Parameter(Mandatory)]
         [string]$Ssid,
-
         [string]$InterfaceAlias = 'Wi-Fi'
     )
 
@@ -105,7 +132,6 @@ function Connect-WifiSsid {
         Write-Host "[!] Could not connect to '$Ssid'. Make sure its Wi-Fi profile is saved on this laptop." -ForegroundColor Yellow
         return $false
     }
-
     Start-Sleep -Seconds 5
     return ((Get-ConnectedWifiSsid) -eq $Ssid)
 }
@@ -133,7 +159,17 @@ function Set-LaptopHotspotState {
         return $true
     }
 
-    Write-Host "[!] Could not confirm laptop hotspot state = $Enabled." -ForegroundColor Yellow
+    Write-Host "[!] Could not confirm laptop hotspot state = $Enabled. Restarting Windows Hotspot service to fix hang..." -ForegroundColor Yellow
+    Stop-Service -Name "icssvc" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    Start-Service -Name "icssvc" -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
+
+    if ((Get-LaptopHotspotEnabled) -eq $Enabled) {
+        return $true
+    }
+
+    Write-Host "[!] Windows hotspot service is unresponsive." -ForegroundColor Red
     return $false
 }
 
@@ -147,33 +183,6 @@ function Invoke-NetworkRefresh {
     }
 }
 
-function Invoke-PhoneHotspotProbe {
-    param(
-        [Parameter(Mandatory)]
-        [string]$PhoneHotspotSSID,
-
-        [Parameter(Mandatory)]
-        [string]$InterfaceAlias
-    )
-
-    if (-not (Set-LaptopHotspotState -Enabled $false)) {
-        Write-Host "[!] Could not pause laptop hotspot for phone probe." -ForegroundColor Yellow
-        return $false
-    }
-
-    Start-Sleep -Seconds 3
-    $phoneDetected = Test-WifiSsidAvailable -Ssid $PhoneHotspotSSID
-    if ($phoneDetected -eq $true -and (Connect-WifiSsid -Ssid $PhoneHotspotSSID -InterfaceAlias $InterfaceAlias)) {
-        Invoke-NetworkRefresh
-        Write-Host "Phone hotspot '$PhoneHotspotSSID' detected during probe." -ForegroundColor Green
-        return $true
-    }
-
-    Write-Host "Phone hotspot '$PhoneHotspotSSID' not detected during probe; restoring laptop hotspot." -ForegroundColor Yellow
-    Set-LaptopHotspotState -Enabled $true | Out-Null
-    return $false
-}
-
 function Invoke-WifiTierManager {
     param(
         [Parameter(Mandatory)]
@@ -184,155 +193,105 @@ function Invoke-WifiTierManager {
 
         [string]$InterfaceAlias = 'Wi-Fi',
 
-        [ValidateRange(1, 5)]
-        [int]$PhoneUnavailableThreshold = 3,
-
-        [ValidateRange(1, 60)]
-        [int]$PhoneProbeMinutes = 2
+        [int]$PhoneUnavailableThreshold = 3
     )
 
     $connectedSsid = Get-ConnectedWifiSsid
     $laptopHotspotEnabled = Get-LaptopHotspotEnabled
     if ($null -eq $laptopHotspotEnabled) {
-        $laptopHotspotEnabled = $script:LastLaptopHotspotEnabled
-        if ($null -eq $laptopHotspotEnabled) {
-            $laptopHotspotEnabled = $false
-        }
-        Write-Host "[!] Tethering state unavailable; retaining previous laptop-hotspot state: $laptopHotspotEnabled." -ForegroundColor Yellow
+        $laptopHotspotEnabled = $false
     }
-    $phoneSsidVisible = Test-WifiSsidAvailable -Ssid $PhoneHotspotSSID
 
-    # Windows does not list this laptop's own Mobile Hotspot in the scan, but
-    # it does list the configured phone SSID when the phone hotspot is active.
-    if ($laptopHotspotEnabled) {
-        $now = Get-Date
-        $probeSlot = [math]::Floor($now.TimeOfDay.TotalMinutes / $PhoneProbeMinutes)
-        $currentProbeSlotKey = "$($now.ToString('yyyy-MM-dd'))-$probeSlot"
-        if ($null -eq $script:LastPhoneProbeSlotKey) {
-            $script:LastPhoneProbeSlotKey = $currentProbeSlotKey
-        }
+    # If we are connected to the phone, we enforce the laptop hotspot to be OFF 
+    # to avoid double-broadcasting the same Satalink name.
+    if ($connectedSsid -eq $PhoneHotspotSSID -and $laptopHotspotEnabled) {
+        Write-Host "Connected directly to Phone Hotspot; disabling local mirrored hotspot." -ForegroundColor Cyan
+        Set-LaptopHotspotState -Enabled $false | Out-Null
+        $laptopHotspotEnabled = $false
+    }
 
-        $probeDue = ($script:LastPhoneProbeSlotKey -ne $currentProbeSlotKey)
-        if ($probeDue) {
-            $script:LastPhoneProbeSlotKey = $currentProbeSlotKey
-            if (Invoke-PhoneHotspotProbe -PhoneHotspotSSID $PhoneHotspotSSID -InterfaceAlias $InterfaceAlias) {
-                $script:PhoneUnavailableMisses = 0
-            }
-            return
-        }
-
-        if ($phoneSsidVisible -eq $true) {
-            # Stop tethering before changing the upstream profile. Windows can
-            # invalidate the old connection profile during the switch.
-            if (-not (Set-LaptopHotspotState -Enabled $false)) {
-                Write-Host "[!] Phone hotspot detected, but laptop hotspot could not be stopped." -ForegroundColor Yellow
-                return
-            }
-
-            if (-not (Connect-WifiSsid -Ssid $PhoneHotspotSSID -InterfaceAlias $InterfaceAlias)) {
-                Write-Host "[!] Phone hotspot was visible but the connection did not complete." -ForegroundColor Yellow
-                return
-            }
-
-            $script:PhoneUnavailableMisses = 0
-            Invoke-NetworkRefresh
-            Write-Host "Phone hotspot '$PhoneHotspotSSID' is connected." -ForegroundColor Green
-            return
-        }
-
-        if ($null -eq $phoneSsidVisible) {
-            Write-Host "[!] Phone hotspot scan unavailable; preserving the laptop hotspot tier." -ForegroundColor Yellow
-            return
-        }
-
-        Write-Host "Laptop hotspot is active; phone hotspot is not detected." -ForegroundColor Green
-        return
+    # Anti-Flap Check
+    if ($null -ne $script:PhoneBlacklistUntil -and (Get-Date) -lt $script:PhoneBlacklistUntil) {
+        $phoneSsidVisible = $false
+    } else {
+        $phoneSsidVisible = Test-WifiSsidAvailable -Ssid $PhoneHotspotSSID
     }
 
     if ($null -eq $phoneSsidVisible) {
-        Write-Host "[!] Phone hotspot scan unavailable; preserving the current tier." -ForegroundColor Yellow
+        Write-Host "[!] Wi-Fi scan unavailable; preserving current state." -ForegroundColor Yellow
         return
     }
 
-    $phoneAvailable = ($phoneSsidVisible -eq $true) -and -not $laptopHotspotEnabled
-
-    if ($phoneAvailable) {
-        if ($connectedSsid -ne $PhoneHotspotSSID) {
-            if (Connect-WifiSsid -Ssid $PhoneHotspotSSID -InterfaceAlias $InterfaceAlias) {
-                Write-Host "Phone hotspot '$PhoneHotspotSSID' is connected." -ForegroundColor Green
-                Invoke-NetworkRefresh
-            } else {
-                $phoneAvailable = $false
-            }
-        } else {
+    # STATE 1: Already Connected to Phone
+    if ($connectedSsid -eq $PhoneHotspotSSID) {
+        if ($phoneSsidVisible) {
+            $script:PhoneUnavailableMisses = 0
             Write-Host "Phone hotspot '$PhoneHotspotSSID' is connected." -ForegroundColor Green
+            return
+        }
+    }
+
+    # STATE 2: Phone is visible, but we are NOT connected to it
+    if ($phoneSsidVisible -and $connectedSsid -ne $PhoneHotspotSSID) {
+        if ($laptopHotspotEnabled) {
+            Set-LaptopHotspotState -Enabled $false | Out-Null
+            $laptopHotspotEnabled = $false
         }
 
-        if ($phoneAvailable) {
+        if (Connect-WifiSsid -Ssid $PhoneHotspotSSID -InterfaceAlias $InterfaceAlias) {
+            Write-Host "Phone hotspot '$PhoneHotspotSSID' is connected." -ForegroundColor Green
+            Invoke-NetworkRefresh
             $script:PhoneUnavailableMisses = 0
             return
+        } else {
+            Write-Host "[!] Phone hotspot was visible but connection failed (Stale Cache). Backing off for 3 minutes." -ForegroundColor Yellow
+            $script:PhoneBlacklistUntil = (Get-Date).AddMinutes(3)
+            return
         }
     }
 
-    if ($connectedSsid -and ($FallbackSSIDs -contains $connectedSsid)) {
-        if (-not (Set-LaptopHotspotState -Enabled $true)) {
-            Write-Host "[!] Fallback Wi-Fi '$connectedSsid' is connected, but the laptop hotspot could not be enabled." -ForegroundColor Yellow
+    # STATE 3: Phone is NOT visible (or we missed it on a scan while connected)
+    if ($connectedSsid -eq $PhoneHotspotSSID) {
+        if ($null -eq $script:PhoneUnavailableMisses) { $script:PhoneUnavailableMisses = 0 }
+        $script:PhoneUnavailableMisses++
+        Write-Host "Phone hotspot '$PhoneHotspotSSID' scan missed. Miss $($script:PhoneUnavailableMisses) of $PhoneUnavailableThreshold." -ForegroundColor Yellow
+
+        if ($script:PhoneUnavailableMisses -lt $PhoneUnavailableThreshold) {
             return
         }
 
-        $now = Get-Date
-        $slot = [math]::Floor($now.TimeOfDay.TotalMinutes / $PhoneProbeMinutes)
-        $script:LastPhoneProbeSlotKey = "$($now.ToString('yyyy-MM-dd'))-$slot"
-        $script:PhoneUnavailableMisses = 0
-        Write-Host "Fallback Wi-Fi '$connectedSsid' is connected; laptop hotspot is active." -ForegroundColor Green
-        Invoke-NetworkRefresh
-        return
-    }
-
-    if ($null -eq $script:PhoneUnavailableMisses) {
-        $script:PhoneUnavailableMisses = 0
-    }
-    $script:PhoneUnavailableMisses++
-    Write-Host "Phone hotspot '$PhoneHotspotSSID' unavailable. Miss $($script:PhoneUnavailableMisses) of $PhoneUnavailableThreshold." -ForegroundColor Yellow
-
-    if ($script:PhoneUnavailableMisses -lt $PhoneUnavailableThreshold) {
-        return
-    }
-
-    Write-Host "Phone hotspot threshold reached; switching to fallback Wi-Fi." -ForegroundColor Yellow
-
-    if ($connectedSsid -eq $PhoneHotspotSSID) {
+        Write-Host "Phone hotspot threshold reached; disconnecting." -ForegroundColor Yellow
         $netshPath = Get-NetshPath
         & $netshPath wlan disconnect interface="$InterfaceAlias" | Out-Null
         Start-Sleep -Seconds 2
         $connectedSsid = Get-ConnectedWifiSsid
-        Write-Host "Phone hotspot '$PhoneHotspotSSID' is unavailable; disconnected." -ForegroundColor Yellow
+        
+    } elseif ($connectedSsid -and ($FallbackSSIDs -contains $connectedSsid)) {
+        # We are securely connected to the Fallback.
+        if (-not $laptopHotspotEnabled) {
+            if (-not (Set-LaptopHotspotState -Enabled $true)) {
+                Write-Host "[!] Fallback Wi-Fi '$connectedSsid' is connected, but the laptop hotspot could not be enabled." -ForegroundColor Yellow
+            } else {
+                Write-Host "Fallback Wi-Fi '$connectedSsid' is connected; laptop hotspot is active." -ForegroundColor Green
+            }
+        } else {
+            Write-Host "Fallback Wi-Fi '$connectedSsid' is connected; laptop hotspot is active." -ForegroundColor Green
+        }
+        $script:PhoneUnavailableMisses = 0
+        return
     }
 
+    # STATE 4: Disconnected. Search for Fallback.
     foreach ($fallbackSsid in $FallbackSSIDs) {
         $fallbackAvailable = Test-WifiSsidAvailable -Ssid $fallbackSsid
-        if ($fallbackAvailable -ne $true) {
-            continue
-        }
-
-        if ($connectedSsid -eq $fallbackSsid) {
-            Write-Host "Fallback Wi-Fi '$fallbackSsid' is connected." -ForegroundColor Green
-            Set-LaptopHotspotState -Enabled $true | Out-Null
-            $now = Get-Date
-            $slot = [math]::Floor($now.TimeOfDay.TotalMinutes / $PhoneProbeMinutes)
-            $script:LastPhoneProbeSlotKey = "$($now.ToString('yyyy-MM-dd'))-$slot"
-            Invoke-NetworkRefresh
-            return
-        }
-
-        if (Connect-WifiSsid -Ssid $fallbackSsid -InterfaceAlias $InterfaceAlias) {
-            Write-Host "Connected to fallback Wi-Fi '$fallbackSsid'." -ForegroundColor Green
-            Set-LaptopHotspotState -Enabled $true | Out-Null
-            $now = Get-Date
-            $slot = [math]::Floor($now.TimeOfDay.TotalMinutes / $PhoneProbeMinutes)
-            $script:LastPhoneProbeSlotKey = "$($now.ToString('yyyy-MM-dd'))-$slot"
-            Invoke-NetworkRefresh
-            return
+        if ($fallbackAvailable) {
+            if (Connect-WifiSsid -Ssid $fallbackSsid -InterfaceAlias $InterfaceAlias) {
+                Write-Host "Connected to fallback Wi-Fi '$fallbackSsid'." -ForegroundColor Green
+                Set-LaptopHotspotState -Enabled $true | Out-Null
+                Invoke-NetworkRefresh
+                $script:PhoneUnavailableMisses = 0
+                return
+            }
         }
     }
 

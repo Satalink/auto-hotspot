@@ -1,14 +1,19 @@
 # Auto Hotspot configuration
 # Copy this file to settings.yaml and replace the example values.
 
-PhoneHotspotSSID: "phone-hostspot-ssid-1"
+# The SSID (Network Name) of your phone's hotspot
+PhoneHotspotSSID: "Satalink"
 
+WifiInterfaceAlias: "Wi-Fi"
+
+# List of backup Wi-Fi networks to connect to when the phone is unavailable
 FallbackSSIDs:
   - "wifi-ssid-1"
   - "wifi-ssid-2"
   - "wifi-ssid-3"
 
-WifiInterfaceAlias: "Wi-Fi"
+# How often (in seconds) the script checks the connection status
 PollSeconds: 30
+
+# How many failed checks before deciding the phone is truly gone
 PhoneUnavailableThreshold: 3
-PhoneProbeMinutes: 3
